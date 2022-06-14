@@ -1,18 +1,22 @@
 ## WARNING: --opt:speed breaks it!
 import winim
 import hmatching
-# import strenc
 
 {.passC: "-masm=intel".}
 
+const bytesFromFunction = 20 # how many bytes should be searched for the syscall
+
 proc getSyscall(dll: HMODULE, procname: string): int16 =
+  ## searches for the syscall of the given function.
+  ## returns -1 if the syscall was not found
   var pntCreateThread: pointer = dll.GetProcAddress(procname)
   var antCreateThread: ptr array[20, byte] = cast[ptr array[20, byte]](pntCreateThread)
-  # var coll: seq[byte] = @[]
-  for idx in 0 ..< 20:
+  for idx in 0 ..< bytesFromFunction:
+    if idx + 6 > bytesFromFunction:
+      return -1
     let cur = antCreateThread[idx].byte
     let six = @[
-      antCreateThread[idx].byte,
+      antCreateThread[idx + 0].byte,
       antCreateThread[idx + 1].byte,
       antCreateThread[idx + 2].byte,
       antCreateThread[idx + 3].byte,
@@ -23,19 +27,9 @@ proc getSyscall(dll: HMODULE, procname: string): int16 =
       var arr: array[2, byte] = [a, b]
       var wor: int16 = cast[int16](arr)
       return wor
-      break
 
-import print
+
 var ntdll = LoadLibrary("ntdll.dll")
- # print ntdll.getSyscall("NtOpenProcess").toHex()
- # print ntdll.getSyscall("NtAllocateVirtualMemory").toHex()
- # print ntdll.getSyscall("NtWriteVirtualMemory").toHex()
- # print ntdll.getSyscall("NtCreateThreadEx").toHex()
- # print ntdll.getSyscall("NtClose").toHex()
- # print ntdll.getSyscall("NtCreateThread").toHex()
- # print ntdll.getSyscall("NtOpenFile").toHex()
- # print ntdll.getSyscall("NtProtectVirtualMemory").toHex()
-
 
 ## Global syscall table
 template generateGlobalSyscallTable() {.dirty.} =
@@ -49,21 +43,11 @@ template generateGlobalSyscallTable() {.dirty.} =
   var sysNtProtectVirtualMemory = ntdll.getSyscall("NtProtectVirtualMemory")
   echo sysNtOpenProcess
 
-
 generateGlobalSyscallTable()
 FreeLibrary(ntdll)
 
-
-# {.push stackTrace:off.}
-# template syscall(num: WORD) =
-#   asm """
-#       MOV        %RCX, %R10
-#       MOV        `num`, %EAX
-#       SYSCALL
-#   """
-
 {.push stackTrace: off.}
-proc MyNtOpenProcess*(ProcessHandle: PHANDLE, AccessMask: ACCESS_MASK,
+proc SyscallNtOpenProcess*(ProcessHandle: PHANDLE, AccessMask: ACCESS_MASK,
       ObjectAttributes: POBJECT_ATTRIBUTES,
           ClientId: PCLIENT_ID): NTSTATUS {.fastcall, asmNoStackFrame.} =
   asm """
@@ -75,7 +59,7 @@ proc MyNtOpenProcess*(ProcessHandle: PHANDLE, AccessMask: ACCESS_MASK,
 {.pop.}
 
 {.push stackTrace: off.}
-proc MyNtAllocateVirtualMemory*(ProcessHandle: HANDLE, BaseAddress: PVOID,
+proc SyscallNtAllocateVirtualMemory*(ProcessHandle: HANDLE, BaseAddress: PVOID,
     ZeroBits: ULONG_PTR, RegionSize: PSIZE_T, AllocationType: ULONG,
         Protect: ULONG): NTSTATUS {.fastcall, asmNoStackFrame.} =
   asm """
@@ -87,7 +71,7 @@ proc MyNtAllocateVirtualMemory*(ProcessHandle: HANDLE, BaseAddress: PVOID,
 {.pop.}
 
 {.push stackTrace: off.}
-proc MyNtWriteVirtualMemory*(ProcessHandle: HANDLE, BaseAddress: PVOID,
+proc SyscallNtWriteVirtualMemory*(ProcessHandle: HANDLE, BaseAddress: PVOID,
     Buffer: PVOID, NumberOfBytesToWrite: ULONG,
     NumberOfBytesWritten: PULONG): NTSTATUS {.fastcall, asmNoStackFrame.} =
   asm """
@@ -99,7 +83,7 @@ proc MyNtWriteVirtualMemory*(ProcessHandle: HANDLE, BaseAddress: PVOID,
 {.pop.}
 
 {.push stackTrace: off.}
-proc NtCreateThread(
+proc SyscallNtCreateThread(
     ThreadHandle: PHANDLE,
     DesiredAccess: ACCESS_MASK,
     ObjectAttributes: POBJECT_ATTRIBUTES,
@@ -117,26 +101,31 @@ proc NtCreateThread(
 {.pop.}
 
 
+when isMainModule:
+  import print
+  import osproc, os
 
-# import winim
-# MyNtOpenProcess()
+  print ntdll.getSyscall("NtOpenProcess").toHex()
+  print ntdll.getSyscall("NtAllocateVirtualMemory").toHex()
+  print ntdll.getSyscall("NtWriteVirtualMemory").toHex()
+  print ntdll.getSyscall("NtCreateThreadEx").toHex()
+  print ntdll.getSyscall("NtClose").toHex()
+  print ntdll.getSyscall("NtCreateThread").toHex()
+  print ntdll.getSyscall("NtOpenFile").toHex()
+  print ntdll.getSyscall("NtProtectVirtualMemory").toHex()
 
+  let tProcess = startProcess("notepad.exe")
+  tProcess.suspend() # That's handy!
+  var cid: CLIENT_ID
+  var oa: OBJECT_ATTRIBUTES
+  var pHandle: HANDLE
 
+  cid.UniqueProcess = tProcess.processID
 
-import osproc, os
-let tProcess = startProcess("notepad.exe")
-tProcess.suspend() # That's handy!
-# sleep(1000)
-var cid: CLIENT_ID
-var oa: OBJECT_ATTRIBUTES
-var pHandle: HANDLE
-
-cid.UniqueProcess = tProcess.processID
-
-var status = MyNtOpenProcess(
-    &pHandle,
-    PROCESS_ALL_ACCESS,
-    &oa, &cid
-)
-echo status
-echo "[*] pHandle: ", pHandle
+  var status = SyscallNtOpenProcess(
+      &pHandle,
+      PROCESS_ALL_ACCESS,
+      &oa, &cid
+  )
+  echo status
+  echo "[*] pHandle: ", pHandle
